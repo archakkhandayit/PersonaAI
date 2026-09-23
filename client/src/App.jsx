@@ -30,7 +30,12 @@ function App() {
 
     const userMessage = { role: "user", content: trimmed };
     const updatedMessages = [...messages, userMessage];
-    setMessages(updatedMessages);
+    if(updatedMessages.length>10){
+      updatedMessages.shift();
+    }
+
+    // Add user message + empty assistant placeholder
+    setMessages([...updatedMessages, { role: "assistant", content: "" }]);
     setInput("");
     setLoading(true);
 
@@ -41,24 +46,76 @@ function App() {
         body: JSON.stringify({ messages: updatedMessages }),
       });
 
-      const data = await res.json();
+      if (!res.ok) {
+        const data = await res.json();
+        setMessages((prev) => {
+          const updated = [...prev];
+          updated[updated.length - 1] = {
+            role: "assistant",
+            content: "⚠️ Error: " + (data.error || "Something went wrong"),
+          };
+          return updated;
+        });
+        return;
+      }
 
-      if (res.ok) {
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: data.reply },
-        ]);
-      } else {
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: "⚠️ Error: " + (data.error || "Something went wrong") },
-        ]);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        // Keep the last (possibly incomplete) line in the buffer
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const trimmedLine = line.trim();
+          if (!trimmedLine || !trimmedLine.startsWith("data: ")) continue;
+
+          const data = trimmedLine.slice(6); // remove "data: "
+          if (data === "[DONE]") break;
+
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.content) {
+              setMessages((prev) => {
+                const updated = [...prev];
+                const last = updated[updated.length - 1];
+                updated[updated.length - 1] = {
+                  ...last,
+                  content: last.content + parsed.content,
+                };
+                return updated;
+              });
+            }
+            if (parsed.error) {
+              setMessages((prev) => {
+                const updated = [...prev];
+                updated[updated.length - 1] = {
+                  role: "assistant",
+                  content: "⚠️ " + parsed.error,
+                };
+                return updated;
+              });
+            }
+          } catch {
+            // skip malformed JSON lines
+          }
+        }
       }
     } catch {
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: "⚠️ Server se connect nahi ho paa raha. Make sure backend is running." },
-      ]);
+      setMessages((prev) => {
+        const updated = [...prev];
+        updated[updated.length - 1] = {
+          role: "assistant",
+          content: "⚠️ Server se connect nahi ho paa raha. Make sure backend is running.",
+        };
+        return updated;
+      });
     } finally {
       setLoading(false);
       inputRef.current?.focus();
@@ -120,22 +177,19 @@ function App() {
             {msg.role === "assistant" && <div className="msg-avatar">HC</div>}
             <div className="msg-bubble">
               {msg.role === "assistant" ? (
-                <ReactMarkdown>{msg.content}</ReactMarkdown>
+                msg.content ? (
+                  <ReactMarkdown>{msg.content}</ReactMarkdown>
+                ) : (
+                  <div className="typing">
+                    <span></span><span></span><span></span>
+                  </div>
+                )
               ) : (
                 <p>{msg.content}</p>
               )}
             </div>
           </div>
         ))}
-
-        {loading && (
-          <div className="message assistant">
-            <div className="msg-avatar">HC</div>
-            <div className="msg-bubble typing">
-              <span></span><span></span><span></span>
-            </div>
-          </div>
-        )}
 
         <div ref={messagesEndRef} />
       </main>

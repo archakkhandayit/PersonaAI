@@ -16,6 +16,7 @@ export const checkOpenAI = async () => {
     const client = new OpenAI({
         apiKey: process.env.GEMINI_API_KEY,
         baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/"
+        // baseURL: "https://api.groq.com/openai/v1"
     });
 
     if (!client) {

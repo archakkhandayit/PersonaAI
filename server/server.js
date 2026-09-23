@@ -10,6 +10,9 @@ app.use(express.json());
 
 const OpenAIClient = await checkOpenAI();
 const model = "gemini-3.5-flash-lite";
+// // const model = "gemini-3.8-flash";
+// // const model = "llama-3.1-8b-instant";
+// const model = "qwen/qwen3.8-27b";
 
 const SYSTEM_PROMPT =
 `You are an AI persona inspired by Hitesh Choudhary's publicly available communication style, teaching approach, and content.
@@ -163,7 +166,7 @@ Always:
 * Use markdown format for response
 `;
 
-// POST /chat — expects { messages: [{ role, content }] }
+// POST /chat — SSE streaming response
 app.post("/chat", async (req, res) => {
     try {
         const { messages } = req.body;
@@ -172,29 +175,50 @@ app.post("/chat", async (req, res) => {
             return res.status(400).json({ error: "messages array is required" });
         }
 
-        const response = await OpenAIClient.chat.completions.create({
+        // Set SSE headers
+        res.setHeader("Content-Type", "text/event-stream");
+        res.setHeader("Cache-Control", "no-cache");
+        res.setHeader("Connection", "keep-alive");
+        res.flushHeaders();
+
+        console.log(`\n[${new Date().toLocaleTimeString()}] User: ${messages[messages.length - 1].content}`);
+
+        const stream = await OpenAIClient.chat.completions.create({
             model,
+            stream: true,
             messages: [
                 { role: "system", content: SYSTEM_PROMPT },
                 ...messages,
             ],
+            max_completion_tokens: 1000,
         });
 
-        const assistantMessage = response.choices[0].message.content;
-        const usage = {
-            prompt_tokens: response.usage.prompt_tokens,
-            completion_tokens: response.usage.completion_tokens,
-            total_tokens: response.usage.total_tokens,
-        };
+        let fullResponse = "";
 
-        console.log(`\n[${new Date().toLocaleTimeString()}] User: ${messages[messages.length - 1].content}`);
-        console.log(`Assistant: ${assistantMessage}`);
-        console.table(usage);
+        for await (const chunk of stream) {
+            const content = chunk.choices[0]?.delta?.content;
+            if (content) {
+                fullResponse += content;
+                res.write(`data: ${JSON.stringify({ content })}\n\n`);
+            }
+        }
 
-        res.json({ reply: assistantMessage, usage });
+        // Signal completion
+        res.write("data: [DONE]\n\n");
+        res.end();
+
+        console.log(`Assistant: ${fullResponse}\n`);
     } catch (err) {
         console.error("Chat error:", err.message);
-        res.status(500).json({ error: "Something went wrong" });
+        const errorMsg = err.status ? `API error ${err.status}: ${err.message}` : err.message;
+        // If headers haven't been sent yet, send JSON error
+        if (!res.headersSent) {
+            res.status(500).json({ error: errorMsg });
+        } else {
+            res.write(`data: ${JSON.stringify({ error: errorMsg })}\n\n`);
+            res.write("data: [DONE]\n\n");
+            res.end();
+        }
     }
 });
 
