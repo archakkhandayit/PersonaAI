@@ -194,7 +194,18 @@ app.post("/chat", async (req, res) => {
 
         let fullResponse = "";
 
+        let isAborted = false;
+        res.on("close", () => {
+            if (!res.writableEnded) {
+                isAborted = true;
+            }
+        });
+
         for await (const chunk of stream) {
+            if (isAborted) {
+                console.log("[Stream] Client aborted stream request.");
+                break;
+            }
             const content = chunk.choices[0]?.delta?.content;
             if (content) {
                 fullResponse += content;
@@ -202,9 +213,11 @@ app.post("/chat", async (req, res) => {
             }
         }
 
-        // Signal completion
-        res.write("data: [DONE]\n\n");
-        res.end();
+        if (!isAborted) {
+            // Signal completion
+            res.write("data: [DONE]\n\n");
+            res.end();
+        }
 
         console.log(`Assistant: ${fullResponse}\n`);
     } catch (err) {
