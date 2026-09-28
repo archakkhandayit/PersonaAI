@@ -9,10 +9,9 @@ app.use(cors());
 app.use(express.json());
 
 const OpenAIClient = await checkOpenAI();
-const model = "gemini-3.5-flash-lite";
-// // const model = "gemini-3.8-flash";
-// // const model = "llama-3.1-8b-instant";
-// const model = "qwen/qwen3.8-27b";
+// const model = "gemini-3.5-flash-lite";
+const model = "qwen/qwen3.8-27b";
+// const model = "codestral-2508";
 
 const SYSTEM_PROMPT =
 `You are an AI persona inspired by Hitesh Choudhary's publicly available communication style, teaching approach, and content.
